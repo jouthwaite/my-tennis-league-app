@@ -1,7 +1,39 @@
 import React, { useState } from 'react';
 
-export default function TennisLeague() {
-  const [players, setPlayers] = useState([
+interface Player {
+  id: number;
+  name: string;
+  points: number;
+  wins: number;
+  losses: number;
+}
+
+interface Match {
+  id: number;
+  team1: [string, string];
+  team2: [string, string];
+  team1Score: number;
+  team2Score: number;
+  winner: 'team1' | 'team2';
+}
+
+interface NewMatch {
+  team1Player1: string;
+  team1Player2: string;
+  team2Player1: string;
+  team2Player2: string;
+  team1Score: string;
+  team2Score: string;
+}
+
+interface ExportData {
+  players: Player[];
+  matches: Match[];
+  exportDate: string;
+}
+
+function App() {
+  const [players, setPlayers] = useState<Player[]>([
     { id: 1, name: 'Leena Anis', points: 0, wins: 0, losses: 0 },
     { id: 2, name: 'James Outhwaite', points: 0, wins: 0, losses: 0 },
     { id: 3, name: 'Ruby Frank', points: 0, wins: 0, losses: 0 },
@@ -17,8 +49,8 @@ export default function TennisLeague() {
     { id: 13, name: 'Stephen Sillars', points: 0, wins: 0, losses: 0 }
   ]);
   
-  const [matches, setMatches] = useState([]);
-  const [newMatch, setNewMatch] = useState({
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [newMatch, setNewMatch] = useState<NewMatch>({
     team1Player1: '',
     team1Player2: '',
     team2Player1: '',
@@ -38,11 +70,11 @@ export default function TennisLeague() {
     }]);
   };
 
-  const removePlayer = (id) => {
+  const removePlayer = (id: number) => {
     setPlayers(players.filter(p => p.id !== id));
   };
 
-  const updatePlayerName = (id, name) => {
+  const updatePlayerName = (id: number, name: string) => {
     setPlayers(players.map(p => p.id === id ? { ...p, name } : p));
   };
 
@@ -57,7 +89,7 @@ export default function TennisLeague() {
     const team1Score = parseInt(newMatch.team1Score);
     const team2Score = parseInt(newMatch.team2Score);
     
-    const match = {
+    const match: Match = {
       id: Date.now(),
       team1: [newMatch.team1Player1, newMatch.team1Player2],
       team2: [newMatch.team2Player1, newMatch.team2Player2],
@@ -117,7 +149,7 @@ export default function TennisLeague() {
     });
   };
 
-  const deleteMatch = (matchId) => {
+  const deleteMatch = (matchId: number) => {
     const match = matches.find(m => m.id === matchId);
     if (!match) return;
 
@@ -165,7 +197,7 @@ export default function TennisLeague() {
   const sortedPlayers = [...players].sort((a, b) => b.points - a.points);
 
   const exportToJSON = () => {
-    const data = {
+    const data: ExportData = {
       players: players,
       matches: matches,
       exportDate: new Date().toISOString()
@@ -181,17 +213,20 @@ export default function TennisLeague() {
     document.body.removeChild(downloadAnchor);
   };
 
-  const importFromJSON = (event) => {
-    const file = event.target.files[0];
+  const importFromJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e: ProgressEvent<FileReader>) => {
       try {
-        const data = JSON.parse(e.target.result);
-        setPlayers(data.players);
-        setMatches(data.matches);
-        alert('Data imported successfully!');
+        const result = e.target?.result;
+        if (typeof result === 'string') {
+          const data = JSON.parse(result) as ExportData;
+          setPlayers(data.players);
+          setMatches(data.matches);
+          alert('Data imported successfully!');
+        }
       } catch (error) {
         alert('Error importing file. Please check the file format.');
         console.error(error);
@@ -440,3 +475,5 @@ export default function TennisLeague() {
     </div>
   );
 }
+
+export default App;
