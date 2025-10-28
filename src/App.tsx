@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-// NOTE: TS 'as const' is used for type assertions in the functions below
-
 interface Player {
   id: number;
   name: string;
@@ -44,6 +42,7 @@ interface DetailedPlayerStats extends Player {
     currentStreak: string;
     bestPartner: { name: string; winRate: string } | null;
     worstPartner: { name: string; winRate: string } | null;
+    biggestRival: { name: string; losses: number } | null; // NEW RIVAL STAT
 }
 
 function App() {
@@ -270,7 +269,7 @@ function App() {
     // 2. Current Streak Calculation
     let currentStreak = 0;
     let streakType: 'Win' | 'Loss' = 'Win';
-    const reversedMatches = [...playerMatches].sort((a, b) => b.id - a.id); // Sort by most recent first
+    const reversedMatches = [...playerMatches].sort((a, b) => b.id - a.id);
     
     for (const match of reversedMatches) {
         const isWin = (match.team1.includes(playerIdStr) && match.winner === 'team1') || 
@@ -282,7 +281,7 @@ function App() {
         } else if ((isWin && streakType === 'Win') || (!isWin && streakType === 'Loss')) {
             currentStreak++;
         } else {
-            break; // Streak broken
+            break; 
         }
     }
     const streakDisplay = currentStreak > 0 ? `${currentStreak}-${streakType}` : 'N/A';
@@ -314,7 +313,7 @@ function App() {
 
     for (const id in partnerStats) {
         const stats = partnerStats[id];
-        if (stats.total < 2) continue; // Require minimum 2 matches together
+        if (stats.total < 2) continue;
         
         const rate = stats.wins / stats.total;
         const partnerName = players.find(p => String(p.id) === id)?.name || 'Unknown';
@@ -328,16 +327,44 @@ function App() {
             worstPartner = { name: partnerName, winRate: (rate * 100).toFixed(1) + '%' };
         }
     }
+    
+    // 4. Biggest Rival Calculation (NEW STAT)
+    const opponentLosses: { [opponentId: string]: number } = {};
+    let maxLosses = 0;
+    let biggestRival: { name: string; losses: number } | null = null;
+
+    playerMatches.forEach(match => {
+        const isLoss = (match.team1.includes(playerIdStr) && match.winner === 'team2') || 
+                       (match.team2.includes(playerIdStr) && match.winner === 'team1');
+        
+        if (!isLoss) return; // Only care about losses
+
+        const opponentTeam = match.team1.includes(playerIdStr) ? match.team2 : match.team1;
+        
+        opponentTeam.forEach(opponentId => {
+            if (!opponentLosses[opponentId]) {
+                opponentLosses[opponentId] = 0;
+            }
+            opponentLosses[opponentId]++;
+            
+            if (opponentLosses[opponentId] > maxLosses) {
+                maxLosses = opponentLosses[opponentId];
+                const rivalName = players.find(p => String(p.id) === opponentId)?.name || 'Unknown';
+                biggestRival = { name: rivalName, losses: maxLosses };
+            }
+        });
+    });
 
     return {
       ...player,
       totalMatches,
       winRate,
-      recentMatches: playerMatches.slice(-5).reverse(), // Still need the slice for display
+      recentMatches: playerMatches.slice(-5).reverse(),
       scoreMargin: scoreMargin,
       currentStreak: streakDisplay,
       bestPartner,
-      worstPartner: bestPartner?.name !== worstPartner?.name ? worstPartner : null, // Prevent showing the same partner twice
+      worstPartner: bestPartner?.name !== worstPartner?.name ? worstPartner : null,
+      biggestRival: maxLosses > 0 ? biggestRival : null, // Only return if they have at least one loss
     };
   };
 
@@ -791,6 +818,14 @@ function App() {
                             <p className="text-xl md:text-2xl font-bold text-red-700">{stats.worstPartner.name}</p>
                         </div>
                     )}
+                    
+                    {/* NEW: Biggest Rival Stat */}
+                    {stats.biggestRival && (
+                        <div className="bg-orange-100 rounded-lg p-3 text-center col-span-1 md:col-span-1">
+                            <p className="text-xs md:text-sm text-gray-600 mb-1">Biggest Rival ({stats.biggestRival.losses} Losses)</p>
+                            <p className="text-xl md:text-2xl font-bold text-orange-700">{stats.biggestRival.name}</p>
+                        </div>
+                    )}
                   </div>
 
 
@@ -859,7 +894,7 @@ function App() {
         @media print {
           body {
             print-color-adjust: exact;
-            -webkit-print-adjust-print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
           }
           .print\\:hidden {
             display: none !important;
