@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
+// NOTE: TS 'as const' is used for type assertions in the functions below
+
 interface Player {
   id: number;
   name: string;
@@ -494,7 +496,7 @@ function App() {
                   <thead>
                     <tr className="border-b-2 border-gray-200">
                       <th className="text-left py-3 px-2 md:px-4 text-gray-700 text-sm">Rank</th>
-                      <th className="text-left py-3 px-2 md:px-4 text-gray-700 text-sm">Player Name</th>
+                      <th className="text-left py-3 px-2 md:px-4 text-gray-700 text-sm **w-4/12**">Player Name</th>
                       <th className="text-center py-3 px-2 md:px-4 text-gray-700 text-sm">Points</th>
                       <th className="text-center py-3 px-2 md:px-4 text-gray-700 text-sm">Wins</th>
                       <th className="text-center py-3 px-2 md:px-4 text-gray-700 text-sm">Losses</th>
@@ -509,7 +511,7 @@ function App() {
                             {index + 1}
                           </span>
                         </td>
-                        <td className="py-3 px-2 md:px-4">
+                        <td className="py-3 px-2 md:px-4 **w-4/12**">
                           <input
                             type="text"
                             value={player.name}
@@ -819,7 +821,7 @@ function App() {
                         </div>
                     )}
                     
-                    {/* NEW: Biggest Rival Stat */}
+                    {/* Biggest Rival Stat */}
                     {stats.biggestRival && (
                         <div className="bg-orange-100 rounded-lg p-3 text-center col-span-1 md:col-span-1">
                             <p className="text-xs md:text-sm text-gray-600 mb-1">Biggest Rival ({stats.biggestRival.losses} Losses)</p>
