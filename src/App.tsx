@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// NOTE: Since you removed the Lucide icons, I've used emojis 
-// and kept the remaining logic clean.
+// NOTE: TS 'as const' is used for type assertions in the functions below
 
 interface Player {
   id: number;
@@ -13,7 +12,7 @@ interface Player {
 
 interface Match {
   id: number;
-  team1: [string, string]; // NOTE: IDs are stored as strings here
+  team1: [string, string];
   team2: [string, string];
   team1Score: number;
   team2Score: number;
@@ -34,6 +33,17 @@ interface ExportData {
   players: Player[];
   matches: Match[];
   exportDate: string;
+}
+
+// Interface for the detailed stats returned by getPlayerStats
+interface DetailedPlayerStats extends Player {
+    totalMatches: number;
+    winRate: string;
+    recentMatches: Match[];
+    scoreMargin: string;
+    currentStreak: string;
+    bestPartner: { name: string; winRate: string } | null;
+    worstPartner: { name: string; winRate: string } | null;
 }
 
 function App() {
@@ -133,7 +143,6 @@ function App() {
     const losingTeam = match.winner === 'team1' ? match.team2 : match.team1;
 
     winningTeam.forEach(playerId => {
-      // Player IDs are strings from the select, but player.id is a number. We need to parse.
       const player = updatedPlayers.find(p => p.id === parseInt(playerId));
       if (player) {
         player.points += pointsForWin * multiplier;
@@ -168,7 +177,7 @@ function App() {
       team2: [newMatch.team2Player1, newMatch.team2Player2],
       team1Score,
       team2Score,
-      winner: team1Score > team2Score ? 'team1' : 'team2',
+      winner: team1Score > team2Score ? 'team1' as const : 'team2' as const,
       date: new Date().toISOString()
     };
 
@@ -210,7 +219,7 @@ function App() {
     // Update match with new winner
     const updatedMatch: Match = {
       ...editingMatch,
-      winner: editingMatch.team1Score > editingMatch.team2Score ? 'team1' : 'team2'
+      winner: editingMatch.team1Score > editingMatch.team2Score ? 'team1' as const : 'team2' as const
     };
 
     // Add new stats
@@ -229,23 +238,106 @@ function App() {
       )
     : matches;
 
-  const getPlayerStats = (playerId: number) => {
+  const getPlayerStats = (playerId: number): DetailedPlayerStats | null => {
     const player = players.find(p => p.id === playerId);
     if (!player) return null;
 
+    const playerIdStr = String(playerId);
     const playerMatches = matches.filter(m => 
-      m.team1.includes(String(playerId)) || m.team2.includes(String(playerId))
+      m.team1.includes(playerIdStr) || m.team2.includes(playerIdStr)
     );
 
-    const winRate = player.wins + player.losses > 0 
-      ? ((player.wins / (player.wins + player.losses)) * 100).toFixed(1)
+    const totalMatches = player.wins + player.losses;
+
+    const winRate = totalMatches > 0 
+      ? ((player.wins / totalMatches) * 100).toFixed(1)
       : '0.0';
+
+    // 1. Average Score Margin Calculation
+    let totalScoreDiff = 0;
+    
+    playerMatches.forEach(match => {
+      const isTeam1 = match.team1.includes(playerIdStr);
+      const scoreFor = isTeam1 ? match.team1Score : match.team2Score;
+      const scoreAgainst = isTeam1 ? match.team2Score : match.team1Score;
+      totalScoreDiff += (scoreFor - scoreAgainst);
+    });
+
+    const scoreMargin = totalMatches > 0 
+      ? (totalScoreDiff / totalMatches).toFixed(1)
+      : '0.0';
+
+    // 2. Current Streak Calculation
+    let currentStreak = 0;
+    let streakType: 'Win' | 'Loss' = 'Win';
+    const reversedMatches = [...playerMatches].sort((a, b) => b.id - a.id); // Sort by most recent first
+    
+    for (const match of reversedMatches) {
+        const isWin = (match.team1.includes(playerIdStr) && match.winner === 'team1') || 
+                      (match.team2.includes(playerIdStr) && match.winner === 'team2');
+        
+        if (currentStreak === 0) {
+            streakType = isWin ? 'Win' : 'Loss';
+            currentStreak = 1;
+        } else if ((isWin && streakType === 'Win') || (!isWin && streakType === 'Loss')) {
+            currentStreak++;
+        } else {
+            break; // Streak broken
+        }
+    }
+    const streakDisplay = currentStreak > 0 ? `${currentStreak}-${streakType}` : 'N/A';
+    
+    // 3. Best/Worst Partner Calculation
+    const partnerStats: { [partnerId: string]: { wins: number; total: number } } = {};
+
+    playerMatches.forEach(match => {
+        const isTeam1 = match.team1.includes(playerIdStr);
+        const partnerTeam = isTeam1 ? match.team1 : match.team2;
+        const partnerId = partnerTeam.find(id => id !== playerIdStr);
+        if (!partnerId) return;
+
+        const isWin = (isTeam1 && match.winner === 'team1') || (!isTeam1 && match.winner === 'team2');
+
+        if (!partnerStats[partnerId]) {
+            partnerStats[partnerId] = { wins: 0, total: 0 };
+        }
+        partnerStats[partnerId].total++;
+        if (isWin) {
+            partnerStats[partnerId].wins++;
+        }
+    });
+
+    let bestPartner: { name: string; winRate: string } | null = null;
+    let worstPartner: { name: string; winRate: string } | null = null;
+    let bestRate = -1;
+    let worstRate = 2; // Start high
+
+    for (const id in partnerStats) {
+        const stats = partnerStats[id];
+        if (stats.total < 2) continue; // Require minimum 2 matches together
+        
+        const rate = stats.wins / stats.total;
+        const partnerName = players.find(p => String(p.id) === id)?.name || 'Unknown';
+
+        if (rate > bestRate) {
+            bestRate = rate;
+            bestPartner = { name: partnerName, winRate: (rate * 100).toFixed(1) + '%' };
+        }
+        if (rate < worstRate) {
+            worstRate = rate;
+            worstPartner = { name: partnerName, winRate: (rate * 100).toFixed(1) + '%' };
+        }
+    }
 
     return {
       ...player,
-      totalMatches: player.wins + player.losses,
+      totalMatches,
       winRate,
-      recentMatches: playerMatches.slice(-5).reverse()
+      recentMatches: playerMatches.slice(-5).reverse(), // Still need the slice for display
+      scoreMargin: scoreMargin,
+      currentStreak: streakDisplay,
+      bestPartner,
+      worstPartner: bestPartner?.name !== worstPartner?.name ? worstPartner : null, // Prevent showing the same partner twice
     };
   };
 
@@ -638,7 +730,7 @@ function App() {
             </div>
           </>
         ) : (
-          /* Player Statistics View (This section was already complete) */
+          /* Player Statistics View */
           <div className="space-y-6">
             {sortedPlayers.map((player) => {
               const stats = getPlayerStats(player.id);
@@ -656,8 +748,8 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-4">
+                  {/* 1. Core Stats Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-6 border-b pb-4">
                     <div className="bg-green-50 rounded-lg p-3 text-center">
                       <p className="text-xs md:text-sm text-gray-600 mb-1">Total Matches</p>
                       <p className="text-xl md:text-2xl font-bold text-gray-900">{stats.totalMatches}</p>
@@ -675,8 +767,34 @@ function App() {
                       <p className="text-xl md:text-2xl font-bold text-green-800">{stats.winRate}%</p>
                     </div>
                   </div>
+                  
+                  {/* 2. Advanced Stats Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 mb-6">
+                    <div className={`rounded-lg p-3 text-center ${stats.scoreMargin > '0' ? 'bg-blue-100' : 'bg-red-100'}`}>
+                      <p className="text-xs md:text-sm text-gray-600 mb-1">Avg Score Margin</p>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900">{stats.scoreMargin}</p>
+                    </div>
+                    <div className={`rounded-lg p-3 text-center ${stats.currentStreak.includes('Win') ? 'bg-yellow-100' : 'bg-red-100'}`}>
+                      <p className="text-xs md:text-sm text-gray-600 mb-1">Current Streak</p>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900">{stats.currentStreak}</p>
+                    </div>
+                    
+                    {stats.bestPartner && (
+                        <div className="bg-purple-100 rounded-lg p-3 text-center">
+                            <p className="text-xs md:text-sm text-gray-600 mb-1">Best Partner ({stats.bestPartner.winRate})</p>
+                            <p className="text-xl md:text-2xl font-bold text-purple-700">{stats.bestPartner.name}</p>
+                        </div>
+                    )}
+                    {stats.worstPartner && (
+                        <div className="bg-red-100 rounded-lg p-3 text-center">
+                            <p className="text-xs md:text-sm text-gray-600 mb-1">Worst Partner ({stats.worstPartner.winRate})</p>
+                            <p className="text-xl md:text-2xl font-bold text-red-700">{stats.worstPartner.name}</p>
+                        </div>
+                    )}
+                  </div>
 
-                  {/* Recent Matches */}
+
+                  {/* 3. Recent Matches */}
                   {stats.recentMatches.length > 0 && (
                     <div>
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">Recent Matches</h4>
@@ -741,7 +859,7 @@ function App() {
         @media print {
           body {
             print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
+            -webkit-print-adjust-print-color-adjust: exact;
           }
           .print\\:hidden {
             display: none !important;
