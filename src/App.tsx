@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 
+// NOTE: Since you removed the Lucide icons, I've used emojis 
+// and kept the remaining logic clean.
+
 interface Player {
   id: number;
   name: string;
@@ -10,7 +13,7 @@ interface Player {
 
 interface Match {
   id: number;
-  team1: [string, string];
+  team1: [string, string]; // NOTE: IDs are stored as strings here
   team2: [string, string];
   team1Score: number;
   team2Score: number;
@@ -120,6 +123,35 @@ function App() {
     return null;
   };
 
+  const updatePlayerStats = (match: Match, action: 'add' | 'remove') => {
+    const updatedPlayers = [...players];
+    const pointsForWin = 3;
+    const pointsForLoss = 1;
+    const multiplier = action === 'add' ? 1 : -1;
+
+    const winningTeam = match.winner === 'team1' ? match.team1 : match.team2;
+    const losingTeam = match.winner === 'team1' ? match.team2 : match.team1;
+
+    winningTeam.forEach(playerId => {
+      // Player IDs are strings from the select, but player.id is a number. We need to parse.
+      const player = updatedPlayers.find(p => p.id === parseInt(playerId));
+      if (player) {
+        player.points += pointsForWin * multiplier;
+        player.wins += 1 * multiplier;
+      }
+    });
+
+    losingTeam.forEach(playerId => {
+      const player = updatedPlayers.find(p => p.id === parseInt(playerId));
+      if (player) {
+        player.points += pointsForLoss * multiplier;
+        player.losses += 1 * multiplier;
+      }
+    });
+
+    setPlayers(updatedPlayers);
+  };
+
   const addMatch = () => {
     const validationError = validateMatch();
     if (validationError) {
@@ -152,34 +184,6 @@ function App() {
     });
   };
 
-  const updatePlayerStats = (match: Match, action: 'add' | 'remove') => {
-    const updatedPlayers = [...players];
-    const pointsForWin = 3;
-    const pointsForLoss = 1;
-    const multiplier = action === 'add' ? 1 : -1;
-
-    const winningTeam = match.winner === 'team1' ? match.team1 : match.team2;
-    const losingTeam = match.winner === 'team1' ? match.team2 : match.team1;
-
-    winningTeam.forEach(playerId => {
-      const player = updatedPlayers.find(p => p.id === parseInt(playerId));
-      if (player) {
-        player.points += pointsForWin * multiplier;
-        player.wins += 1 * multiplier;
-      }
-    });
-
-    losingTeam.forEach(playerId => {
-      const player = updatedPlayers.find(p => p.id === parseInt(playerId));
-      if (player) {
-        player.points += pointsForLoss * multiplier;
-        player.losses += 1 * multiplier;
-      }
-    });
-
-    setPlayers(updatedPlayers);
-  };
-
   const deleteMatch = (matchId: number) => {
     const match = matches.find(m => m.id === matchId);
     if (!match) return;
@@ -204,9 +208,9 @@ function App() {
     updatePlayerStats(oldMatch, 'remove');
 
     // Update match with new winner
-    const updatedMatch = {
+    const updatedMatch: Match = {
       ...editingMatch,
-      winner: editingMatch.team1Score > editingMatch.team2Score ? 'team1' as const : 'team2' as const
+      winner: editingMatch.team1Score > editingMatch.team2Score ? 'team1' : 'team2'
     };
 
     // Add new stats
@@ -364,126 +368,6 @@ function App() {
                     ➕ Add Player
                   </button>
                 </div>
-          </>
-        ) : (
-          /* Player Statistics View */
-          <div className="space-y-6">
-            {sortedPlayers.map((player) => {
-              const stats = getPlayerStats(player.id);
-              if (!stats) return null;
-
-              return (
-                <div key={player.id} className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
-                    <div>
-                      <h3 className="text-xl md:text-2xl font-bold text-gray-900">{player.name}</h3>
-                      <p className="text-sm text-gray-600">Rank #{sortedPlayers.indexOf(player) + 1}</p>
-                    </div>
-                    <div className="bg-green-800 text-white px-4 py-2 rounded-full font-bold">
-                      {player.points} pts
-                    </div>
-                  </div>
-
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-4">
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                      <p className="text-xs md:text-sm text-gray-600 mb-1">Total Matches</p>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900">{stats.totalMatches}</p>
-                    </div>
-                    <div className="bg-green-100 rounded-lg p-3 text-center">
-                      <p className="text-xs md:text-sm text-gray-600 mb-1">Wins</p>
-                      <p className="text-xl md:text-2xl font-bold text-green-700">{player.wins}</p>
-                    </div>
-                    <div className="bg-gray-100 rounded-lg p-3 text-center">
-                      <p className="text-xs md:text-sm text-gray-600 mb-1">Losses</p>
-                      <p className="text-xl md:text-2xl font-bold text-gray-600">{player.losses}</p>
-                    </div>
-                    <div className="bg-green-200 rounded-lg p-3 text-center">
-                      <p className="text-xs md:text-sm text-gray-600 mb-1">Win Rate</p>
-                      <p className="text-xl md:text-2xl font-bold text-green-800">{stats.winRate}%</p>
-                    </div>
-                  </div>
-
-                  {/* Recent Matches */}
-                  {stats.recentMatches.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Recent Matches</h4>
-                      <div className="space-y-2">
-                        {stats.recentMatches.map((match) => {
-                          const isTeam1 = match.team1.includes(String(player.id));
-                          const isWinner = (isTeam1 && match.winner === 'team1') || (!isTeam1 && match.winner === 'team2');
-                          const partnerTeam = isTeam1 ? match.team1 : match.team2;
-                          const partnerId = partnerTeam.find(id => id !== String(player.id));
-                          const partner = players.find(p => p.id === parseInt(partnerId || '0'));
-                          const opponentTeam = isTeam1 ? match.team2 : match.team1;
-                          const opponents = opponentTeam.map(id => 
-                            players.find(p => p.id === parseInt(id))?.name || 'Unknown'
-                          );
-
-                          const matchDate = new Date(match.date).toLocaleDateString('en-GB', {
-                            day: 'numeric',
-                            month: 'short'
-                          });
-
-                          return (
-                            <div 
-                              key={match.id} 
-                              className={`p-3 rounded-lg border-2 ${
-                                isWinner ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-300'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex-1">
-                                  <p className="text-xs md:text-sm font-medium">
-                                    {isWinner ? '✅ Win' : '❌ Loss'} with {partner?.name || 'Unknown'}
-                                  </p>
-                                  <p className="text-xs text-gray-600">vs {opponents.join(' & ')}</p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-sm md:text-base font-bold">
-                                    {isTeam1 ? `${match.team1Score}-${match.team2Score}` : `${match.team2Score}-${match.team1Score}`}
-                                  </p>
-                                  <p className="text-xs text-gray-500">{matchDate}</p>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="text-center mt-8 text-xs md:text-sm text-gray-500 print:hidden">
-          <p>Powered by Chip Financial • Building wealth on and off the court</p>
-        </div>
-      </div>
-
-      {/* Print Styles */}
-      <style>{`
-        @media print {
-          body {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          .print\\:border-0 {
-            border: 0 !important;
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-export default App;>
               </div>
               
               <div className="overflow-x-auto">
@@ -751,4 +635,124 @@ export default App;>
                   })}
                 </div>
               )}
-            </div
+            </div>
+          </>
+        ) : (
+          /* Player Statistics View (This section was already complete) */
+          <div className="space-y-6">
+            {sortedPlayers.map((player) => {
+              const stats = getPlayerStats(player.id);
+              if (!stats) return null;
+
+              return (
+                <div key={player.id} className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
+                    <div>
+                      <h3 className="text-xl md:text-2xl font-bold text-gray-900">{player.name}</h3>
+                      <p className="text-sm text-gray-600">Rank #{sortedPlayers.indexOf(player) + 1}</p>
+                    </div>
+                    <div className="bg-green-800 text-white px-4 py-2 rounded-full font-bold">
+                      {player.points} pts
+                    </div>
+                  </div>
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-4">
+                    <div className="bg-green-50 rounded-lg p-3 text-center">
+                      <p className="text-xs md:text-sm text-gray-600 mb-1">Total Matches</p>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900">{stats.totalMatches}</p>
+                    </div>
+                    <div className="bg-green-100 rounded-lg p-3 text-center">
+                      <p className="text-xs md:text-sm text-gray-600 mb-1">Wins</p>
+                      <p className="text-xl md:text-2xl font-bold text-green-700">{player.wins}</p>
+                    </div>
+                    <div className="bg-gray-100 rounded-lg p-3 text-center">
+                      <p className="text-xs md:text-sm text-gray-600 mb-1">Losses</p>
+                      <p className="text-xl md:text-2xl font-bold text-gray-600">{player.losses}</p>
+                    </div>
+                    <div className="bg-green-200 rounded-lg p-3 text-center">
+                      <p className="text-xs md:text-sm text-gray-600 mb-1">Win Rate</p>
+                      <p className="text-xl md:text-2xl font-bold text-green-800">{stats.winRate}%</p>
+                    </div>
+                  </div>
+
+                  {/* Recent Matches */}
+                  {stats.recentMatches.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Recent Matches</h4>
+                      <div className="space-y-2">
+                        {stats.recentMatches.map((match) => {
+                          const isTeam1 = match.team1.includes(String(player.id));
+                          const isWinner = (isTeam1 && match.winner === 'team1') || (!isTeam1 && match.winner === 'team2');
+                          const partnerTeam = isTeam1 ? match.team1 : match.team2;
+                          const partnerId = partnerTeam.find(id => id !== String(player.id));
+                          const partner = players.find(p => p.id === parseInt(partnerId || '0'));
+                          const opponentTeam = isTeam1 ? match.team2 : match.team1;
+                          const opponents = opponentTeam.map(id => 
+                            players.find(p => p.id === parseInt(id))?.name || 'Unknown'
+                          );
+
+                          const matchDate = new Date(match.date).toLocaleDateString('en-GB', {
+                            day: 'numeric',
+                            month: 'short'
+                          });
+
+                          return (
+                            <div 
+                              key={match.id} 
+                              className={`p-3 rounded-lg border-2 ${
+                                isWinner ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <p className="text-xs md:text-sm font-medium">
+                                    {isWinner ? '✅ Win' : '❌ Loss'} with {partner?.name || 'Unknown'}
+                                  </p>
+                                  <p className="text-xs text-gray-600">vs {opponents.join(' & ')}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm md:text-base font-bold">
+                                    {isTeam1 ? `${match.team1Score}-${match.team2Score}` : `${match.team2Score}-${match.team1Score}`}
+                                  </p>
+                                  <p className="text-xs text-gray-500">{matchDate}</p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="text-center mt-8 text-xs md:text-sm text-gray-500 print:hidden">
+          <p>Powered by Chip Financial • Building wealth on and off the court</p>
+        </div>
+      </div>
+
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+          .print\\:hidden {
+            display: none !important;
+          }
+          .print\\:border-0 {
+            border: 0 !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+export default App;
