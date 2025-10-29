@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // FIX 1: Import all necessary types and functions for Firebase interactions
-import { db } from './firebase.ts'; // Ensure this path correctly points to your file
+import { db } from './firebase.js'; // Ensure this path correctly points to your file
 import { 
   collection, 
   onSnapshot, 
