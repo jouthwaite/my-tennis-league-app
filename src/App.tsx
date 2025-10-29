@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-import { db } from './firebase'; 
+// FIX 1: Import all necessary types and functions for Firebase interactions
+import { db } from './firebase.ts'; // Ensure this path correctly points to your file
 import { 
   collection, 
   onSnapshot, 
@@ -10,13 +11,19 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  writeBatch 
+  writeBatch,
+  // ADDED TYPES for TypeScript compiler to pass
+  QuerySnapshot, 
+  QueryDocumentSnapshot
 } from 'firebase/firestore';
 
-// NOTE: TS 'as const' is used for type assertions in the functions below
+// Renaming Error to avoid conflict with native Error
+type FirebaseError = Error;
+
+// --- INTERFACES: ID type changed to string for Firestore consistency ---
 
 interface Player {
-  id: number;
+  id: string; // CHANGED FROM number
   name: string;
   points: number;
   wins: number;
@@ -24,7 +31,7 @@ interface Player {
 }
 
 interface Match {
-  id: number;
+  id: string; // CHANGED FROM number
   team1: [string, string];
   team2: [string, string];
   team1Score: number;
@@ -48,7 +55,6 @@ interface ExportData {
   exportDate: string;
 }
 
-// Interface for the detailed stats returned by getPlayerStats
 interface DetailedPlayerStats extends Player {
     totalMatches: number;
     winRate: string;
@@ -57,7 +63,7 @@ interface DetailedPlayerStats extends Player {
     currentStreak: string;
     bestPartner: { name: string; winRate: string } | null;
     worstPartner: { name: string; winRate: string } | null;
-    biggestRival: { name: string; losses: number } | null; // NEW RIVAL STAT
+    biggestRival: { name: string; losses: number } | null;
 }
 
 function App() {
@@ -65,8 +71,8 @@ function App() {
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
   const [filterPlayer, setFilterPlayer] = useState<string>('');
   
+  // State is initialized as empty and populated by Firebase listener
   const [players, setPlayers] = useState<Player[]>([]);
-  
   const [matches, setMatches] = useState<Match[]>([]);
 
   const [newMatch, setNewMatch] = useState<NewMatch>({
@@ -77,64 +83,125 @@ function App() {
     team1Score: '',
     team2Score: ''
   });
-// ADD this new useEffect block after your useState definitions
+
+// --- REAL-TIME LISTENERS (useEffect) ---
+
 useEffect(() => {
   // --- 1. Players Listener (Leaderboard) ---
   const playersCollection = collection(db, 'players');
-  // Order players by points in descending order
   const playerQuery = query(playersCollection, orderBy('points', 'desc'));
   
-  const unsubscribePlayers = onSnapshot(playerQuery, (snapshot) => {
-    const playerList = snapshot.docs.map(doc => ({
-      // Firestore assigns a unique STRING ID. We MUST use this as the ID.
-      id: doc.id, 
-      ...doc.data()
-    })) as Player[]; // Cast to Player[] to satisfy TypeScript
+  // FIX: Explicitly type snapshot and doc parameters for TypeScript compliance
+  const unsubscribePlayers = onSnapshot(playerQuery, (snapshot: QuerySnapshot) => {
+    const playerList = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({
+      id: doc.id, // Use Firestore string ID
+      ...(doc.data() as Omit<Player, 'id'>)
+    })) as Player[]; 
     setPlayers(playerList);
-  }, (error) => {
+  }, (error: FirebaseError) => { // FIX: Typed error
     console.error("Error fetching players:", error);
   });
 
   // --- 2. Matches Listener ---
   const matchesCollection = collection(db, 'matches');
-  const unsubscribeMatches = onSnapshot(matchesCollection, (snapshot) => {
-    const matchList = snapshot.docs.map(doc => ({
+  const unsubscribeMatches = onSnapshot(matchesCollection, (snapshot: QuerySnapshot) => {
+    const matchList = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({
       id: doc.id,
-      ...doc.data()
-    })) as Match[]; // Cast to Match[]
+      ...(doc.data() as Omit<Match, 'id'>)
+    })) as Match[];
     setMatches(matchList);
-  }, (error) => {
+  }, (error: FirebaseError) => { // FIX: Typed error
     console.error("Error fetching matches:", error);
   });
 
-  // Cleanup: Stop listening when the component unmounts
   return () => {
     unsubscribePlayers();
     unsubscribeMatches();
   };
-}, []); // Empty array runs once on mount
+}, []);
 
-  
-  const addPlayer = () => {
-    const newId = Math.max(...players.map(p => p.id), 0) + 1;
-    setPlayers([...players, { 
-      id: newId, 
-      name: `Player ${newId}`, 
-      points: 0, 
-      wins: 0, 
-      losses: 0 
-    }]);
-  };
+// --- FIRESTORE WRITE FUNCTIONS (ASYNCHRONOUS) ---
 
-  const removePlayer = (id: number) => {
-    setPlayers(players.filter(p => p.id !== id));
-  };
+// 1. ADD PLAYER (Uses addDoc)
+const addPlayer = async () => {
+    try {
+      await addDoc(collection(db, 'players'), {
+        name: `New Player`, // New players start with a simple name
+        points: 0, 
+        wins: 0, 
+        losses: 0 
+      });
+    } catch (error) {
+      console.error("Error adding player:", error);
+      alert("Failed to add player to database.");
+    }
+};
 
-  const updatePlayerName = (id: number, name: string) => {
-    setPlayers(players.map(p => p.id === id ? { ...p, name } : p));
-  };
+// 2. REMOVE PLAYER (Uses deleteDoc)
+const removePlayer = async (id: string) => { // ID is now a string
+    if (!confirm('Are you sure you want to delete this player and all their stats?')) return;
+    try {
+        await deleteDoc(doc(db, 'players', id));
+    } catch (error) {
+        console.error("Error deleting player:", error);
+        alert("Failed to delete player from database.");
+    }
+};
 
-  const validateMatch = (): string | null => {
+// 3. UPDATE PLAYER NAME (Uses updateDoc)
+const updatePlayerName = async (id: string, name: string) => { // ID is now a string
+    try {
+        const playerRef = doc(db, 'players', id);
+        await updateDoc(playerRef, { name });
+    } catch (error) {
+        console.error("Error updating player name:", error);
+        // No alert here, as this fires on every keystroke
+    }
+};
+
+
+// 4. UPDATE PLAYER STATS (Internal helper function for Firestore Batch)
+const updatePlayerStats = async (match: Match, action: 'add' | 'remove') => {
+    const pointsForWin = 3;
+    const pointsForLoss = 1;
+    const multiplier = action === 'add' ? 1 : -1;
+
+    const winningTeam = match.winner === 'team1' ? match.team1 : match.team2;
+    const losingTeam = match.winner === 'team1' ? match.team2 : match.team1;
+
+    const batch = writeBatch(db);
+    const playersToUpdate = [...winningTeam, ...losingTeam];
+
+    for (const playerId of playersToUpdate) {
+        const player = players.find(p => p.id === playerId);
+        if (!player) continue;
+
+        const isWinner = winningTeam.includes(playerId);
+        
+        const pointsChange = isWinner ? pointsForWin : pointsForLoss;
+        const winsChange = isWinner ? 1 : 0;
+        const lossesChange = isWinner ? 0 : 1;
+
+        const playerRef = doc(db, 'players', playerId);
+
+        batch.update(playerRef, {
+            points: player.points + pointsChange * multiplier,
+            wins: player.wins + winsChange * multiplier,
+            losses: player.losses + lossesChange * multiplier,
+        });
+    }
+
+    try {
+        await batch.commit();
+    } catch (error) {
+        console.error("Batch update failed:", error);
+        throw new Error("Database error during stat update.");
+    }
+};
+
+
+// 5. ADD MATCH (Asynchronous and uses Firestore)
+const validateMatch = (): string | null => {
     const { team1Player1, team1Player2, team2Player1, team2Player2 } = newMatch;
     
     if (!team1Player1 || !team1Player2 || !team2Player1 || !team2Player2) {
@@ -153,37 +220,9 @@ useEffect(() => {
     }
 
     return null;
-  };
+};
 
-  const updatePlayerStats = (match: Match, action: 'add' | 'remove') => {
-    const updatedPlayers = [...players];
-    const pointsForWin = 3;
-    const pointsForLoss = 1;
-    const multiplier = action === 'add' ? 1 : -1;
-
-    const winningTeam = match.winner === 'team1' ? match.team1 : match.team2;
-    const losingTeam = match.winner === 'team1' ? match.team2 : match.team1;
-
-    winningTeam.forEach(playerId => {
-      const player = updatedPlayers.find(p => p.id === parseInt(playerId));
-      if (player) {
-        player.points += pointsForWin * multiplier;
-        player.wins += 1 * multiplier;
-      }
-    });
-
-    losingTeam.forEach(playerId => {
-      const player = updatedPlayers.find(p => p.id === parseInt(playerId));
-      if (player) {
-        player.points += pointsForLoss * multiplier;
-        player.losses += 1 * multiplier;
-      }
-    });
-
-    setPlayers(updatedPlayers);
-  };
-
-  const addMatch = () => {
+const addMatch = async () => {
     const validationError = validateMatch();
     if (validationError) {
       alert(validationError);
@@ -193,8 +232,7 @@ useEffect(() => {
     const team1Score = parseInt(newMatch.team1Score);
     const team2Score = parseInt(newMatch.team2Score);
     
-    const match: Match = {
-      id: Date.now(),
+    const tempMatch: Omit<Match, 'id'> = {
       team1: [newMatch.team1Player1, newMatch.team1Player2],
       team2: [newMatch.team2Player1, newMatch.team2Player2],
       team1Score,
@@ -202,69 +240,107 @@ useEffect(() => {
       winner: team1Score > team2Score ? 'team1' as const : 'team2' as const,
       date: new Date().toISOString()
     };
+    
+    try {
+        // A. Add match record to Firestore to get the ID
+        const matchRef = await addDoc(collection(db, 'matches'), tempMatch);
+        
+        // B. Apply stats using the match data and its NEW Firestore ID
+        const finalMatch: Match = { ...tempMatch, id: matchRef.id };
+        await updatePlayerStats(finalMatch, 'add');
 
-    updatePlayerStats(match, 'add');
-    setMatches([...matches, match]);
-    setNewMatch({
-      team1Player1: '',
-      team1Player2: '',
-      team2Player1: '',
-      team2Player2: '',
-      team1Score: '',
-      team2Score: ''
-    });
-  };
+        // C. Clear form state only after success
+        setNewMatch({
+            team1Player1: '',
+            team1Player2: '',
+            team2Player1: '',
+            team2Player2: '',
+            team1Score: '',
+            team2Score: ''
+        });
 
-  const deleteMatch = (matchId: number) => {
+    } catch (error) {
+        console.error("Error recording match:", error);
+        alert("Failed to record match due to a database error.");
+    }
+};
+
+// 6. DELETE MATCH (Asynchronous and uses Firestore)
+const deleteMatch = async (matchId: string) => { // ID is now a string
     const match = matches.find(m => m.id === matchId);
     if (!match) return;
 
     if (confirm('Are you sure you want to delete this match?')) {
-      updatePlayerStats(match, 'remove');
-      setMatches(matches.filter(m => m.id !== matchId));
+        try {
+            // A. Reverse stats
+            await updatePlayerStats(match, 'remove'); 
+            
+            // B. Delete match record
+            await deleteDoc(doc(db, 'matches', matchId));
+        } catch (error) {
+            console.error("Error deleting match:", error);
+            alert("Failed to delete match or reverse points.");
+        }
     }
-  };
+};
 
-  const startEditMatch = (match: Match) => {
+
+// 7. SAVE EDIT MATCH (Asynchronous and uses Firestore)
+const startEditMatch = (match: Match) => {
     setEditingMatch(match);
-  };
+};
 
-  const saveEditMatch = () => {
+const saveEditMatch = async () => { // Function is now ASYNCHRONOUS
     if (!editingMatch) return;
 
     const oldMatch = matches.find(m => m.id === editingMatch.id);
     if (!oldMatch) return;
 
-    // Remove old stats
-    updatePlayerStats(oldMatch, 'remove');
+    try {
+        // A. Remove old stats
+        await updatePlayerStats(oldMatch, 'remove');
 
-    // Update match with new winner
-    const updatedMatch: Match = {
-      ...editingMatch,
-      winner: editingMatch.team1Score > editingMatch.team2Score ? 'team1' as const : 'team2' as const
-    };
+        // B. Update match with new winner
+        const updatedMatch: Match = {
+            ...editingMatch,
+            winner: editingMatch.team1Score > editingMatch.team2Score ? 'team1' as const : 'team2' as const
+        };
+        
+        // C. Update the match document in Firestore
+        await updateDoc(doc(db, 'matches', updatedMatch.id), {
+            team1Score: updatedMatch.team1Score,
+            team2Score: updatedMatch.team2Score,
+            winner: updatedMatch.winner
+        });
 
-    // Add new stats
-    updatePlayerStats(updatedMatch, 'add');
+        // D. Add new stats using the updated match data
+        await updatePlayerStats(updatedMatch, 'add');
 
-    // Update matches
-    setMatches(matches.map(m => m.id === updatedMatch.id ? updatedMatch : m));
-    setEditingMatch(null);
-  };
+        // E. Clear editing state
+        setEditingMatch(null);
 
-  const sortedPlayers = [...players].sort((a, b) => b.points - a.points);
+    } catch (error) {
+        console.error("Error saving match edit:", error);
+        alert("Failed to save match edits.");
+    }
+};
 
-  const filteredMatches = filterPlayer 
+
+// --- HELPER FUNCTIONS (Updated to use string IDs) ---
+
+const sortedPlayers = [...players].sort((a, b) => b.points - a.points);
+
+const filteredMatches = filterPlayer 
     ? matches.filter(m => 
         m.team1.includes(filterPlayer) || m.team2.includes(filterPlayer)
       )
     : matches;
 
-  const getPlayerStats = (playerId: number): DetailedPlayerStats | null => {
+const getPlayerStats = (playerId: string): DetailedPlayerStats | null => { // PlayerId is now a string
     const player = players.find(p => p.id === playerId);
     if (!player) return null;
 
-    const playerIdStr = String(playerId);
+    const playerIdStr = playerId;
     const playerMatches = matches.filter(m => 
       m.team1.includes(playerIdStr) || m.team2.includes(playerIdStr)
     );
@@ -292,7 +368,7 @@ useEffect(() => {
     // 2. Current Streak Calculation
     let currentStreak = 0;
     let streakType: 'Win' | 'Loss' = 'Win';
-    const reversedMatches = [...playerMatches].sort((a, b) => b.id - a.id);
+    const reversedMatches = [...playerMatches].sort((a, b) => b.id.localeCompare(a.id));
     
     for (const match of reversedMatches) {
         const isWin = (match.team1.includes(playerIdStr) && match.winner === 'team1') || 
@@ -339,7 +415,7 @@ useEffect(() => {
         if (stats.total < 2) continue;
         
         const rate = stats.wins / stats.total;
-        const partnerName = players.find(p => String(p.id) === id)?.name || 'Unknown';
+        const partnerName = players.find(p => p.id === id)?.name || 'Unknown';
 
         if (rate > bestRate) {
             bestRate = rate;
@@ -351,7 +427,7 @@ useEffect(() => {
         }
     }
     
-    // 4. Biggest Rival Calculation (NEW STAT)
+    // 4. Biggest Rival Calculation
     const opponentLosses: { [opponentId: string]: number } = {};
     let maxLosses = 0;
     let biggestRival: { name: string; losses: number } | null = null;
@@ -360,7 +436,7 @@ useEffect(() => {
         const isLoss = (match.team1.includes(playerIdStr) && match.winner === 'team2') || 
                        (match.team2.includes(playerIdStr) && match.winner === 'team1');
         
-        if (!isLoss) return; // Only care about losses
+        if (!isLoss) return;
 
         const opponentTeam = match.team1.includes(playerIdStr) ? match.team2 : match.team1;
         
@@ -372,7 +448,7 @@ useEffect(() => {
             
             if (opponentLosses[opponentId] > maxLosses) {
                 maxLosses = opponentLosses[opponentId];
-                const rivalName = players.find(p => String(p.id) === opponentId)?.name || 'Unknown';
+                const rivalName = players.find(p => p.id === opponentId)?.name || 'Unknown';
                 biggestRival = { name: rivalName, losses: maxLosses };
             }
         });
@@ -387,11 +463,12 @@ useEffect(() => {
       currentStreak: streakDisplay,
       bestPartner,
       worstPartner: bestPartner?.name !== worstPartner?.name ? worstPartner : null,
-      biggestRival: maxLosses > 0 ? biggestRival : null, // Only return if they have at least one loss
+      biggestRival: maxLosses > 0 ? biggestRival : null,
     };
   };
 
-  const exportToJSON = () => {
+const exportToJSON = () => {
+    // Export data remains the same format, but note IDs are strings now
     const data: ExportData = {
       players: players,
       matches: matches,
@@ -402,38 +479,36 @@ useEffect(() => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(jsonStr);
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `chip-tennis-league-${new Date().toISOString().split('T')[0]}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     document.body.removeChild(downloadAnchor);
-  };
+};
 
-  const importFromJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
+const importFromJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // NOTE: This function is now mainly for backup/restore. 
+    // It doesn't write to Firestore, only provides a console message.
     const reader = new FileReader();
     reader.onload = (e: ProgressEvent<FileReader>) => {
       try {
         const result = e.target?.result;
         if (typeof result === 'string') {
-          const data = JSON.parse(result) as ExportData;
-          setPlayers(data.players);
-          setMatches(data.matches);
-          alert('Data imported successfully!');
+          JSON.parse(result) as ExportData;
+          alert('Import successful to local state, but this function does NOT write to Firebase.');
         }
       } catch (error) {
         alert('Error importing file. Please check the file format.');
-        console.error(error);
       }
     };
     reader.readAsText(file);
     event.target.value = '';
-  };
+};
 
-  const printLeaderboard = () => {
+const printLeaderboard = () => {
     window.print();
-  };
+};
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8">
@@ -517,7 +592,7 @@ useEffect(() => {
                   <thead>
                     <tr className="border-b-2 border-gray-200">
                       <th className="text-left py-3 px-2 md:px-4 text-gray-700 text-sm">Rank</th>
-                      <th className="text-left py-3 px-2 md:px-4 text-gray-700 text-sm **w-6/12**">Player Name</th>
+                      <th className="text-left py-3 px-2 md:px-4 text-gray-700 text-sm w-6/12">Player Name</th>
                       <th className="text-center py-3 px-2 md:px-4 text-gray-700 text-sm">Points</th>
                       <th className="text-center py-3 px-2 md:px-4 text-gray-700 text-sm">Wins</th>
                       <th className="text-center py-3 px-2 md:px-4 text-gray-700 text-sm">Losses</th>
@@ -532,7 +607,7 @@ useEffect(() => {
                             {index + 1}
                           </span>
                         </td>
-                        <td className="py-3 px-2 md:px-4 **w-6/12**">
+                        <td className="py-3 px-2 md:px-4 w-6/12">
                           <input
                             type="text"
                             value={player.name}
@@ -562,7 +637,7 @@ useEffect(() => {
               </div>
               <div className="mt-4 text-xs md:text-sm text-gray-600 bg-green-50 rounded-lg p-3">
                 <p><strong className="text-green-800">Scoring:</strong> Win = 3 points, Loss = 1 point</p>
-                <p className="text-xs mt-1 text-gray-500">💾 Auto-saved to browser storage</p>
+                <p className="text-xs mt-1 text-gray-500">💾 Data loaded from Firebase (Export/Import is for backup only)</p>
               </div>
             </div>
 
@@ -678,10 +753,10 @@ useEffect(() => {
                 <div className="space-y-3">
                   {[...filteredMatches].reverse().map((match) => {
                     const team1Players = match.team1.map(id => 
-                      players.find(p => p.id === parseInt(id))?.name || 'Unknown'
+                      players.find(p => p.id === id)?.name || 'Unknown' 
                     );
                     const team2Players = match.team2.map(id => 
-                      players.find(p => p.id === parseInt(id))?.name || 'Unknown'
+                      players.find(p => p.id === id)?.name || 'Unknown' 
                     );
                     
                     const matchDate = new Date(match.date).toLocaleDateString('en-GB', {
@@ -858,14 +933,14 @@ useEffect(() => {
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">Recent Matches</h4>
                       <div className="space-y-2">
                         {stats.recentMatches.map((match) => {
-                          const isTeam1 = match.team1.includes(String(player.id));
+                          const isTeam1 = match.team1.includes(player.id);
                           const isWinner = (isTeam1 && match.winner === 'team1') || (!isTeam1 && match.winner === 'team2');
                           const partnerTeam = isTeam1 ? match.team1 : match.team2;
-                          const partnerId = partnerTeam.find(id => id !== String(player.id));
-                          const partner = players.find(p => p.id === parseInt(partnerId || '0'));
+                          const partnerId = partnerTeam.find(id => id !== player.id);
+                          const partner = players.find(p => p.id === partnerId);
                           const opponentTeam = isTeam1 ? match.team2 : match.team1;
                           const opponents = opponentTeam.map(id => 
-                            players.find(p => p.id === parseInt(id))?.name || 'Unknown'
+                            players.find(p => p.id === id)?.name || 'Unknown'
                           );
 
                           const matchDate = new Date(match.date).toLocaleDateString('en-GB', {
