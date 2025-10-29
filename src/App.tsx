@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
 
+import { db } from './firebase'; 
+import { 
+  collection, 
+  onSnapshot, 
+  query, 
+  orderBy, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  writeBatch 
+} from 'firebase/firestore';
+
 // NOTE: TS 'as const' is used for type assertions in the functions below
 
 interface Player {
@@ -52,29 +65,9 @@ function App() {
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
   const [filterPlayer, setFilterPlayer] = useState<string>('');
   
-  const [players, setPlayers] = useState<Player[]>(() => {
-    const saved = localStorage.getItem('tennisPlayers');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, name: 'Leena Anis', points: 0, wins: 0, losses: 0 },
-      { id: 2, name: 'James Outhwaite', points: 0, wins: 0, losses: 0 },
-      { id: 3, name: 'Ruby Frank', points: 0, wins: 0, losses: 0 },
-      { id: 4, name: 'Henri Tiensuu', points: 0, wins: 0, losses: 0 },
-      { id: 5, name: 'Jonathan Froggatt', points: 0, wins: 0, losses: 0 },
-      { id: 6, name: 'Rob Dougall', points: 0, wins: 0, losses: 0 },
-      { id: 7, name: 'Danae Alogoskoufi', points: 0, wins: 0, losses: 0 },
-      { id: 8, name: 'Erin Campbell', points: 0, wins: 0, losses: 0 },
-      { id: 9, name: 'Nikesh Mistry', points: 0, wins: 0, losses: 0 },
-      { id: 10, name: 'Corinna Lamberti', points: 0, wins: 0, losses: 0 },
-      { id: 11, name: 'Joe Scott', points: 0, wins: 0, losses: 0 },
-      { id: 12, name: 'Paul Delaney', points: 0, wins: 0, losses: 0 },
-      { id: 13, name: 'Stephen Sillars', points: 0, wins: 0, losses: 0 }
-    ];
-  });
+  const [players, setPlayers] = useState<Player[]>([]);
   
-  const [matches, setMatches] = useState<Match[]>(() => {
-    const saved = localStorage.getItem('tennisMatches');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [matches, setMatches] = useState<Match[]>([]);
 
   const [newMatch, setNewMatch] = useState<NewMatch>({
     team1Player1: '',
@@ -84,16 +77,44 @@ function App() {
     team1Score: '',
     team2Score: ''
   });
+// ADD this new useEffect block after your useState definitions
+useEffect(() => {
+  // --- 1. Players Listener (Leaderboard) ---
+  const playersCollection = collection(db, 'players');
+  // Order players by points in descending order
+  const playerQuery = query(playersCollection, orderBy('points', 'desc'));
+  
+  const unsubscribePlayers = onSnapshot(playerQuery, (snapshot) => {
+    const playerList = snapshot.docs.map(doc => ({
+      // Firestore assigns a unique STRING ID. We MUST use this as the ID.
+      id: doc.id, 
+      ...doc.data()
+    })) as Player[]; // Cast to Player[] to satisfy TypeScript
+    setPlayers(playerList);
+  }, (error) => {
+    console.error("Error fetching players:", error);
+  });
 
-  // Auto-save to localStorage
-  useEffect(() => {
-    localStorage.setItem('tennisPlayers', JSON.stringify(players));
-  }, [players]);
+  // --- 2. Matches Listener ---
+  const matchesCollection = collection(db, 'matches');
+  const unsubscribeMatches = onSnapshot(matchesCollection, (snapshot) => {
+    const matchList = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Match[]; // Cast to Match[]
+    setMatches(matchList);
+  }, (error) => {
+    console.error("Error fetching matches:", error);
+  });
 
-  useEffect(() => {
-    localStorage.setItem('tennisMatches', JSON.stringify(matches));
-  }, [matches]);
+  // Cleanup: Stop listening when the component unmounts
+  return () => {
+    unsubscribePlayers();
+    unsubscribeMatches();
+  };
+}, []); // Empty array runs once on mount
 
+  
   const addPlayer = () => {
     const newId = Math.max(...players.map(p => p.id), 0) + 1;
     setPlayers([...players, { 
